@@ -1,0 +1,6 @@
+{
+  "name": "OBS Donation Alert Overlay",
+  "description": "A transparent cyberpunk OBS stream overlay that pulls real-time donation alerts from a public Google Sheet.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
