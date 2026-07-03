@@ -35,20 +35,20 @@ export default function App() {
     isInitialMountRef.current = isInitialMount;
   }, [isInitialMount]);
 
-  // Safe helper to extract string cell values
+  // Safe helper to extract cell value, supporting both formatted display value (f) and raw value (v)
   const getCellValue = (row: any, index: number): string => {
     if (!row || !row.c) return '';
     const cell = row.c[index];
     if (!cell) return '';
-    if (cell.v === null || cell.v === undefined) return '';
-    return String(cell.v).trim();
+    // Prefer formatted value cell.f if present, otherwise raw value cell.v
+    if (cell.f !== undefined && cell.f !== null) return String(cell.f).trim();
+    if (cell.v !== undefined && cell.v !== null) return String(cell.v).trim();
+    return '';
   };
 
   // Maps row arrays into our AlertData object
-  const parseRowToAlert = (row: any): AlertData | null => {
-    const timestampId = getCellValue(row, 1); // Index 1: Unique tracking string
-    if (!timestampId) return null;
-
+  const parseRowToAlert = (row: any, rowIndex: number): AlertData | null => {
+    const rawTimestamp = getCellValue(row, 1); // Index 1: Timestamp
     const amount = getCellValue(row, 2); // Index 2: Amount
     const rawName = getCellValue(row, 5); // Index 5: Name
     const name = rawName ? rawName : 'Anonymous'; // Fallback natively to 'Anonymous'
@@ -64,8 +64,15 @@ export default function App() {
     if (discord) socials.discord = discord;
     if (telegram) socials.telegram = telegram;
 
+    // Construct a highly robust unique tracking ID
+    // If we have a timestamp, we combine it with the row index so duplicate timestamps still trigger separate alerts.
+    // If we don't have a timestamp, we fallback to a synthetic ID using row index + name + amount.
+    const id = rawTimestamp 
+      ? `${rawTimestamp}_${rowIndex}` 
+      : `synthetic_${rowIndex}_${name}_${amount}`;
+
     return {
-      id: timestampId,
+      id,
       amount,
       name,
       comment,
@@ -93,18 +100,25 @@ export default function App() {
         const rows = parsedData?.table?.rows;
         if (!rows || !Array.isArray(rows) || rows.length === 0) return;
 
-        // Traverse backwards to find the last valid row with an ID in column index 1
-        let lastValidRow = null;
-        for (let i = rows.length - 1; i >= 0; i--) {
-          if (getCellValue(rows[i], 1)) {
-            lastValidRow = rows[i];
-            break;
-          }
-        }
+        // Filter and map all row items that have some actual data (Amount, Name, Comment, or Timestamp)
+        // keeping track of their original spreadsheet index
+        const validRowEntries = rows
+          .map((row: any, idx: number) => ({ row, idx }))
+          .filter(({ row }) => {
+            if (!row || !row.c) return false;
+            const timestamp = getCellValue(row, 1);
+            const amount = getCellValue(row, 2);
+            const name = getCellValue(row, 5);
+            const comment = getCellValue(row, 6);
+            // It's a valid row if it has any key donation cell filled
+            return timestamp !== '' || amount !== '' || name !== '' || comment !== '';
+          });
 
-        if (!lastValidRow || !isSubscribed) return;
+        if (validRowEntries.length === 0 || !isSubscribed) return;
 
-        const latestAlert = parseRowToAlert(lastValidRow);
+        // The very latest valid row in the spreadsheet
+        const latestEntry = validRowEntries[validRowEntries.length - 1];
+        const latestAlert = parseRowToAlert(latestEntry.row, latestEntry.idx);
         if (!latestAlert) return;
 
         const liveId = latestAlert.id;
@@ -117,7 +131,7 @@ export default function App() {
           setIsInitialMount(false);
           isInitialMountRef.current = false;
         } else if (currentSavedId !== null && liveId !== currentSavedId) {
-          // Subsequent polls: trigger if ID changed (newer donation)
+          // Subsequent polls: trigger if the tracking key changes (newer donation row added)
           lastSeenTimestampRef.current = liveId;
           setLastSeenTimestamp(liveId);
           
